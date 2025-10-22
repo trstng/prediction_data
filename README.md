@@ -4,14 +4,14 @@ Standalone data collection system for streaming live Kalshi market data to Supab
 
 ## Features
 
-- **Real-time WebSocket Streaming**: 1-5 second intervals for NFL, NHL, NBA, and College Football markets
-- **Historical Data Backfill**: Fetch available historical data from PolyRouter API
+- **Real-time WebSocket Streaming**: Tick-by-tick data (1-5 sec intervals) for NFL, NHL, NBA, and CFB markets
 - **REST API Polling**: Fallback/supplement to WebSocket for comprehensive coverage
-- **Automatic Market Discovery**: Continuously finds and tracks new sports markets
+- **Automatic Market Discovery**: Continuously finds and tracks new sports markets (326+ markets)
+- **Historical Data Exploration**: Standalone script to explore/backfill data from PolyRouter (run locally)
 - **Health Monitoring**: Built-in health checks and performance metrics
 - **Rate Limiting**: Respects API limits with adaptive rate limiting
 - **Database Optimization**: Batched inserts optimized for backtesting queries
-- **Railway Deployment**: Ready for production deployment with auto-restart
+- **Railway Deployment**: Production-ready with auto-restart and GitHub integration
 
 ## Architecture
 
@@ -131,8 +131,7 @@ TARGET_SPORTS=NFL,NHL,NBA,CFB
 # How often to capture market snapshots (seconds)
 COLLECTION_INTERVAL_SECONDS=3
 
-# Enable/disable components
-ENABLE_HISTORICAL_BACKFILL=true
+# Enable/disable components (historical backfill runs separately via explore_historical.py)
 ENABLE_LIVE_STREAMING=true
 ENABLE_REST_POLLING=true
 ```
@@ -144,6 +143,51 @@ POLYROUTER_REQUESTS_PER_MINUTE=10      # Free tier limit
 KALSHI_REST_REQUESTS_PER_MINUTE=100    # Conservative limit
 BATCH_INSERT_SIZE=500                  # Database batch size
 ```
+
+## Historical Data Exploration
+
+The production bot focuses on **live data collection only**. Historical data from PolyRouter should be explored and backfilled **locally** using the standalone script.
+
+### Explore Available Data
+
+```bash
+# Check what historical data exists for a specific market
+python explore_historical.py explore KXNFLGAME-25NOV02SEAWAS-WAS
+
+# With custom lookback period (default 30 days)
+python explore_historical.py explore KXNFLGAME-25NOV02SEAWAS-WAS 90
+```
+
+This will show you:
+- What intervals are available (1h, 4h, 1d)
+- How many data points exist
+- Sample data points (first and last)
+
+### Backfill Specific Markets
+
+```bash
+# Backfill one or more specific markets
+python explore_historical.py backfill KXNFLGAME-25NOV02SEAWAS-WAS KXNHLGAME-25OCT24CGYWPG-WPG
+```
+
+### Backfill All Active Markets
+
+```bash
+# Backfill all currently active markets (use with caution)
+python explore_historical.py backfill-all --days=30
+```
+
+This will:
+1. Discover all active markets (326+)
+2. Estimate time based on rate limits (10 req/min)
+3. Ask for confirmation
+4. Backfill all markets respecting rate limits
+
+**Note**: Historical backfill is intentionally separated from production deployment so you can:
+- Understand what data exists before backfilling
+- Avoid unexpected API costs or rate limit issues
+- Have full control over what gets backfilled
+- Keep production focused on live data collection
 
 ## Monitoring
 

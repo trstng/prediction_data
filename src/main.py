@@ -11,7 +11,6 @@ from config.settings import settings
 from src.utils.logger import setup_logging
 from src.database.writer import SupabaseWriter
 from src.collectors import (
-    HistoricalDataCollector,
     LiveStreamCollector,
     RestPoller,
     KalshiAuth,
@@ -35,8 +34,7 @@ class DataCollectorOrchestrator:
         self.auth = KalshiAuth()
         self.rest_client = KalshiRestClient(self.auth)
 
-        # Collectors
-        self.historical_collector: Optional[HistoricalDataCollector] = None
+        # Collectors (no historical - that's run separately via standalone script)
         self.live_streamer: Optional[LiveStreamCollector] = None
         self.rest_poller: Optional[RestPoller] = None
 
@@ -66,9 +64,6 @@ class DataCollectorOrchestrator:
             raise Exception("Failed to authenticate with Kalshi API")
 
         # Initialize collectors
-        if settings.enable_historical_backfill:
-            self.historical_collector = HistoricalDataCollector(self.db_writer)
-
         if settings.enable_live_streaming:
             self.live_streamer = LiveStreamCollector(self.db_writer, self.auth)
 
@@ -77,7 +72,6 @@ class DataCollectorOrchestrator:
 
         logger.info(
             "components_initialized",
-            historical=settings.enable_historical_backfill,
             streaming=settings.enable_live_streaming,
             polling=settings.enable_rest_polling
         )
@@ -96,31 +90,6 @@ class DataCollectorOrchestrator:
 
         return markets
 
-    async def start_historical_backfill(self):
-        """Start one-time full historical data backfill."""
-        if not self.historical_collector:
-            logger.info("historical_backfill_disabled")
-            return
-
-        logger.info("starting_one_time_full_historical_backfill")
-
-        # Get active market tickers
-        active_tickers = await self.market_finder.get_active_market_tickers()
-
-        if not active_tickers:
-            logger.warning("no_active_markets_for_backfill")
-            return
-
-        # One-time backfill of ALL available historical data from PolyRouter
-        # This fetches maximum history (365 days) for each market
-        # After this, live streaming handles all future data
-        await self.historical_collector.backfill_markets(
-            active_tickers,
-            days_back=365,  # Get all available history from PolyRouter
-            batch_size=5
-        )
-
-        logger.info("one_time_historical_backfill_completed")
 
     async def start_live_streaming(self):
         """Start live WebSocket streaming."""
@@ -234,10 +203,7 @@ class DataCollectorOrchestrator:
             # Wait for initial markets to be discovered
             await asyncio.sleep(5)
 
-            # Start historical backfill (one-time)
-            await self.start_historical_backfill()
-
-            # Start live data collection
+            # Start live data collection (no historical backfill - run explore_historical.py separately)
             await self.start_live_streaming()
             await self.start_rest_polling()
 
@@ -290,9 +256,6 @@ class DataCollectorOrchestrator:
         await self.db_writer.close()
         await self.auth.close()
         await self.rest_client.close()
-
-        if self.historical_collector:
-            await self.historical_collector.close()
 
         logger.info("shutdown_complete")
 
