@@ -62,8 +62,9 @@ class LiveStreamCollector:
         await self.auth.ensure_authenticated()
 
         try:
-            # Connect with auth headers
-            extra_headers = self.auth.get_headers()
+            # Get signed headers for WebSocket connection
+            # WebSocket path is /trade-api/ws/v2
+            extra_headers = self.auth.get_signed_headers("GET", "/trade-api/ws/v2")
 
             self.websocket = await websockets.connect(
                 self.ws_url,
@@ -79,7 +80,7 @@ class LiveStreamCollector:
             return True
 
         except Exception as e:
-            logger.error("websocket_connection_failed", error=str(e))
+            logger.error("websocket_connection_failed", error=str(e), error_type=type(e).__name__)
             self.is_connected = False
             return False
 
@@ -102,22 +103,14 @@ class LiveStreamCollector:
             return
 
         try:
+            # Use Kalshi's documented subscription format
             subscribe_msg = {
-                "type": "subscribe",
-                "channels": [
-                    {
-                        "name": "orderbook_delta",
-                        "market_tickers": [ticker]
-                    },
-                    {
-                        "name": "ticker",
-                        "market_tickers": [ticker]
-                    },
-                    {
-                        "name": "trade",
-                        "market_tickers": [ticker]
-                    }
-                ]
+                "id": len(self.subscribed_markets) + 1,
+                "cmd": "subscribe",
+                "params": {
+                    "channels": ["ticker", "orderbook_delta", "trades"],
+                    "market_tickers": [ticker]
+                }
             }
 
             await self.websocket.send(json.dumps(subscribe_msg))
