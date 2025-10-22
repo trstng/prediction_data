@@ -204,7 +204,7 @@ class DataCollectorOrchestrator:
 
             # Start market discovery and get discovered markets
             markets = await self.start_market_discovery()
-            market_tickers = [m["ticker"] for m in markets]
+            market_tickers = [m.market_ticker for m in markets]
 
             logger.info("initial_markets_discovered", count=len(market_tickers))
 
