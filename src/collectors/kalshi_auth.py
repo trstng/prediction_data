@@ -79,6 +79,14 @@ class KalshiAuth:
             # Create message to sign: timestamp + method + path + body
             message = f"{timestamp}{method}{path}{body}"
 
+            logger.debug(
+                "creating_signature",
+                timestamp=timestamp,
+                method=method,
+                path=path,
+                message_preview=message[:100] if len(message) > 100 else message
+            )
+
             # Sign the message
             signature = self.private_key.sign(
                 message.encode('utf-8'),

@@ -66,6 +66,12 @@ class LiveStreamCollector:
             # WebSocket path is /trade-api/ws/v2
             extra_headers = self.auth.get_signed_headers("GET", "/trade-api/ws/v2")
 
+            logger.info(
+                "websocket_connecting",
+                url=self.ws_url,
+                headers_present=list(extra_headers.keys())
+            )
+
             self.websocket = await websockets.connect(
                 self.ws_url,
                 extra_headers=extra_headers,
