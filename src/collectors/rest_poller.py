@@ -235,22 +235,32 @@ class RestPoller:
             return False
 
     async def poll_all_markets(self):
-        """Poll all active markets."""
+        """Poll all active markets in batches to respect rate limits."""
         if not self.active_markets:
             logger.warning("no_active_markets_to_poll")
             return
 
-        logger.info("polling_markets", count=len(self.active_markets))
+        # Calculate batch size based on rate limit
+        # If we have 100 req/min and poll every 3 seconds, we can do ~5 requests per poll cycle
+        batch_size = max(1, (settings.kalshi_rest_requests_per_minute * self.poll_interval) // 60)
 
-        # Poll snapshots for all markets
-        tasks = [self.poll_market_snapshot(ticker) for ticker in self.active_markets]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        markets_list = list(self.active_markets)
+        total_markets = len(markets_list)
 
-        success_count = sum(1 for r in results if r is True)
+        logger.info("polling_markets", count=total_markets, batch_size=batch_size)
+
+        success_count = 0
+
+        # Poll in batches
+        for i in range(0, total_markets, batch_size):
+            batch = markets_list[i:i + batch_size]
+            tasks = [self.poll_market_snapshot(ticker) for ticker in batch]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            success_count += sum(1 for r in results if r is True)
 
         logger.info(
             "market_poll_completed",
-            total=len(self.active_markets),
+            total=total_markets,
             successful=success_count
         )
 
