@@ -109,10 +109,20 @@ class LiveStreamCollector:
             return
 
         try:
-            # Use Kalshi's documented subscription format
-            # Note: market_ticker is singular, not plural
-            subscribe_msg = {
-                "id": len(self.subscribed_markets) + 1,
+            # Subscribe to ticker channel for continuous price updates (tick data)
+            # This gives us every bid/ask change, not just trades
+            ticker_msg = {
+                "id": len(self.subscribed_markets) * 2 + 1,
+                "cmd": "subscribe",
+                "params": {
+                    "channels": ["ticker"],
+                    "market_ticker": ticker
+                }
+            }
+
+            # Subscribe to trades and orderbook for this market
+            market_msg = {
+                "id": len(self.subscribed_markets) * 2 + 2,
                 "cmd": "subscribe",
                 "params": {
                     "channels": ["orderbook_delta", "trades"],
@@ -120,7 +130,10 @@ class LiveStreamCollector:
                 }
             }
 
-            await self.websocket.send(json.dumps(subscribe_msg))
+            # Send both subscription messages
+            await self.websocket.send(json.dumps(ticker_msg))
+            await self.websocket.send(json.dumps(market_msg))
+
             self.subscribed_markets.add(ticker)
 
             logger.info("market_subscribed", ticker=ticker)
