@@ -97,9 +97,35 @@ class LiveStreamCollector:
             self.is_connected = False
             logger.info("websocket_disconnected")
 
+    async def subscribe_ticker_global(self):
+        """
+        Subscribe to global ticker channel for all markets.
+        This gives us continuous price updates (tick data) for ALL markets.
+        Must be called ONCE, not per-market.
+        """
+        if not self.is_connected or not self.websocket:
+            logger.warning("cannot_subscribe_ticker_not_connected")
+            return
+
+        try:
+            ticker_msg = {
+                "id": 1,
+                "cmd": "subscribe",
+                "params": {
+                    "channels": ["ticker"]
+                    # NO market_ticker parameter - ticker is global
+                }
+            }
+
+            await self.websocket.send(json.dumps(ticker_msg))
+            logger.info("global_ticker_subscribed")
+
+        except Exception as e:
+            logger.error("ticker_subscription_failed", error=str(e))
+
     async def subscribe_market(self, ticker: str):
         """
-        Subscribe to market updates.
+        Subscribe to market-specific updates (trades and orderbook).
 
         Args:
             ticker: Market ticker to subscribe to
@@ -109,20 +135,10 @@ class LiveStreamCollector:
             return
 
         try:
-            # Subscribe to ticker channel for continuous price updates (tick data)
-            # This gives us every bid/ask change, not just trades
-            ticker_msg = {
-                "id": len(self.subscribed_markets) * 2 + 1,
-                "cmd": "subscribe",
-                "params": {
-                    "channels": ["ticker"],
-                    "market_ticker": ticker
-                }
-            }
-
             # Subscribe to trades and orderbook for this market
+            # Use unique ID based on number of subscribed markets
             market_msg = {
-                "id": len(self.subscribed_markets) * 2 + 2,
+                "id": len(self.subscribed_markets) + 2,  # +2 to avoid ID collision with ticker (id=1)
                 "cmd": "subscribe",
                 "params": {
                     "channels": ["orderbook_delta", "trades"],
@@ -130,8 +146,6 @@ class LiveStreamCollector:
                 }
             }
 
-            # Send both subscription messages
-            await self.websocket.send(json.dumps(ticker_msg))
             await self.websocket.send(json.dumps(market_msg))
 
             self.subscribed_markets.add(ticker)
@@ -144,10 +158,16 @@ class LiveStreamCollector:
     async def subscribe_markets(self, tickers: list[str]):
         """
         Subscribe to multiple markets.
+        First subscribes to global ticker channel, then subscribes to each market individually.
 
         Args:
             tickers: List of market tickers
         """
+        # Subscribe to global ticker channel ONCE for all markets
+        await self.subscribe_ticker_global()
+        await asyncio.sleep(0.2)
+
+        # Then subscribe to trades and orderbook for each market
         for ticker in tickers:
             await self.subscribe_market(ticker)
             await asyncio.sleep(0.1)  # Small delay between subscriptions
