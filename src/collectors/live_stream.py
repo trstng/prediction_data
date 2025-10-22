@@ -275,15 +275,25 @@ class LiveStreamCollector:
             timestamp = int(now.timestamp())
             timestamp_ms = int(now.timestamp() * 1000)
 
+            # Extract price - use yes_price or no_price depending on taker_side
+            taker_side = msg.get("taker_side")
+            if taker_side == "yes":
+                price = msg.get("yes_price")
+            elif taker_side == "no":
+                price = msg.get("no_price")
+            else:
+                # Fallback to yes_price if taker_side is missing
+                price = msg.get("yes_price") or msg.get("no_price")
+
             trade = Trade(
                 market_ticker=ticker,
                 trade_id=msg.get("trade_id"),
                 timestamp=timestamp,
                 timestamp_ms=timestamp_ms,
-                price=msg.get("price"),
+                price=price,
                 size=msg.get("count", msg.get("size", 1)),
                 side=msg.get("side"),
-                taker_side=msg.get("taker_side")
+                taker_side=taker_side
             )
 
             # Insert trades immediately (they're less frequent than ticks)
