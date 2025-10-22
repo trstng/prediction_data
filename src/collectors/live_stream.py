@@ -76,7 +76,7 @@ class LiveStreamCollector:
                 self.ws_url,
                 extra_headers=extra_headers,
                 ping_interval=self.ping_interval,
-                ping_timeout=20
+                ping_timeout=60  # Increased from 20 to handle large market subscriptions
             )
 
             self.is_connected = True
@@ -165,12 +165,12 @@ class LiveStreamCollector:
         """
         # Subscribe to global ticker channel ONCE for all markets
         await self.subscribe_ticker_global()
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.5)
 
         # Then subscribe to trades and orderbook for each market
+        # No delay needed - Kalshi can handle rapid subscriptions
         for ticker in tickers:
             await self.subscribe_market(ticker)
-            await asyncio.sleep(0.1)  # Small delay between subscriptions
 
     async def handle_message(self, message: Dict[str, Any]):
         """
