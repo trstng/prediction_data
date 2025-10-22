@@ -141,7 +141,7 @@ class LiveStreamCollector:
                 "id": len(self.subscribed_markets) + 2,  # +2 to avoid ID collision with ticker (id=1)
                 "cmd": "subscribe",
                 "params": {
-                    "channels": ["orderbook_delta", "trades"],
+                    "channels": ["orderbook_delta", "trade"],  # "trade" not "trades"
                     "market_ticker": ticker
                 }
             }
