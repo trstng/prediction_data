@@ -91,7 +91,7 @@ class DataCollectorOrchestrator:
         return markets
 
 
-    async def start_live_streaming(self):
+    async def start_live_streaming(self, market_tickers: Optional[list] = None):
         """Start live WebSocket streaming."""
         if not self.live_streamer:
             logger.info("live_streaming_disabled")
@@ -99,12 +99,17 @@ class DataCollectorOrchestrator:
 
         logger.info("starting_live_streaming")
 
-        # Get active markets
-        active_tickers = await self.market_finder.get_active_market_tickers()
+        # Get active markets (use provided list or fetch from DB)
+        if market_tickers:
+            active_tickers = market_tickers
+        else:
+            active_tickers = await self.market_finder.get_active_market_tickers()
 
         if not active_tickers:
             logger.warning("no_active_markets_for_streaming")
             return
+
+        logger.info("websocket_markets_loaded", count=len(active_tickers))
 
         # Start WebSocket streaming
         task = asyncio.create_task(
@@ -197,14 +202,15 @@ class DataCollectorOrchestrator:
             # Initialize
             await self.initialize()
 
-            # Start market discovery
-            await self.start_market_discovery()
+            # Start market discovery and get discovered markets
+            markets = await self.start_market_discovery()
+            market_tickers = [m["ticker"] for m in markets]
 
-            # Wait for initial markets to be discovered
-            await asyncio.sleep(5)
+            logger.info("initial_markets_discovered", count=len(market_tickers))
 
-            # Start live data collection (no historical backfill - run explore_historical.py separately)
-            await self.start_live_streaming()
+            # Start live data collection immediately with discovered markets
+            # (no historical backfill - run explore_historical.py separately)
+            await self.start_live_streaming(market_tickers=market_tickers)
             await self.start_rest_polling()
 
             # Start health monitoring
