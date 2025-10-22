@@ -87,10 +87,13 @@ class KalshiAuth:
                 message_preview=message[:100] if len(message) > 100 else message
             )
 
-            # Sign the message
+            # Sign the message using RSA-PSS (required by Kalshi API)
             signature = self.private_key.sign(
                 message.encode('utf-8'),
-                padding.PKCS1v15(),
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.DIGEST_LENGTH
+                ),
                 hashes.SHA256()
             )
 
