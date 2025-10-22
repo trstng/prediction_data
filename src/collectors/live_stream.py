@@ -206,7 +206,9 @@ class LiveStreamCollector:
     async def _handle_ticker(self, message: Dict[str, Any]):
         """Handle ticker update message."""
         try:
-            ticker = message.get("ticker")
+            # Ticker data is in the "msg" field
+            msg = message.get("msg", {})
+            ticker = msg.get("market_ticker")
             if not ticker:
                 return
 
@@ -214,12 +216,11 @@ class LiveStreamCollector:
             timestamp = int(now.timestamp())
             timestamp_ms = int(now.timestamp() * 1000)
 
-            # Extract price data
-            yes_bid = message.get("yes_bid")
-            yes_ask = message.get("yes_ask")
-            no_bid = message.get("no_bid")
-            no_ask = message.get("no_ask")
-            last_price = message.get("last_price")
+            # Extract price data from msg
+            yes_bid = msg.get("yes_bid")
+            yes_ask = msg.get("yes_ask")
+            # Note: ticker doesn't have no_bid/no_ask, only yes side
+            last_price = msg.get("price")  # "price" is the last traded price
 
             # Calculate mid price and spread
             mid_price = None
@@ -234,16 +235,16 @@ class LiveStreamCollector:
                 timestamp_ms=timestamp_ms,
                 yes_bid=yes_bid,
                 yes_ask=yes_ask,
-                no_bid=no_bid,
-                no_ask=no_ask,
+                no_bid=None,  # Not provided in ticker channel
+                no_ask=None,  # Not provided in ticker channel
                 last_price=last_price,
-                yes_bid_size=message.get("yes_bid_size"),
-                yes_ask_size=message.get("yes_ask_size"),
-                no_bid_size=message.get("no_bid_size"),
-                no_ask_size=message.get("no_ask_size"),
-                volume=message.get("volume"),
-                volume_24h=message.get("volume_24h"),
-                open_interest=message.get("open_interest"),
+                yes_bid_size=None,  # Not provided in ticker channel
+                yes_ask_size=None,  # Not provided in ticker channel
+                no_bid_size=None,
+                no_ask_size=None,
+                volume=msg.get("volume"),
+                volume_24h=None,  # Not provided in ticker channel
+                open_interest=msg.get("open_interest"),
                 mid_price=mid_price,
                 spread=spread
             )
@@ -264,7 +265,9 @@ class LiveStreamCollector:
     async def _handle_trade(self, message: Dict[str, Any]):
         """Handle trade execution message."""
         try:
-            ticker = message.get("ticker")
+            # Trade data is in the "msg" field
+            msg = message.get("msg", {})
+            ticker = msg.get("market_ticker")
             if not ticker:
                 return
 
@@ -274,13 +277,13 @@ class LiveStreamCollector:
 
             trade = Trade(
                 market_ticker=ticker,
-                trade_id=message.get("trade_id"),
+                trade_id=msg.get("trade_id"),
                 timestamp=timestamp,
                 timestamp_ms=timestamp_ms,
-                price=message.get("price"),
-                size=message.get("count", message.get("size", 1)),
-                side=message.get("side"),
-                taker_side=message.get("taker_side")
+                price=msg.get("price"),
+                size=msg.get("count", msg.get("size", 1)),
+                side=msg.get("side"),
+                taker_side=msg.get("taker_side")
             )
 
             # Insert trades immediately (they're less frequent than ticks)
@@ -299,7 +302,9 @@ class LiveStreamCollector:
     async def _handle_orderbook_delta(self, message: Dict[str, Any]):
         """Handle orderbook delta update."""
         try:
-            ticker = message.get("ticker")
+            # Orderbook data is in the "msg" field
+            msg = message.get("msg", {})
+            ticker = msg.get("market_ticker")
             if not ticker:
                 return
 
@@ -308,7 +313,7 @@ class LiveStreamCollector:
             logger.debug(
                 "orderbook_delta_received",
                 ticker=ticker,
-                message=message
+                message=msg
             )
 
             # You can implement full orderbook tracking here if needed
