@@ -260,6 +260,21 @@ class DataCollectorOrchestrator:
         logger.info("shutdown_complete")
 
 
+async def run_api_server():
+    """Run FastAPI health check server."""
+    import uvicorn
+    from src.api import app
+
+    config = uvicorn.Config(
+        app,
+        host="0.0.0.0",
+        port=settings.port,
+        log_level="info"
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
+
+
 async def main():
     """Main entry point."""
     # Setup logging
@@ -268,7 +283,8 @@ async def main():
     logger.info(
         "kalshi_data_collector_starting",
         version="1.0.0",
-        environment=settings.environment
+        environment=settings.environment,
+        port=settings.port
     )
 
     # Create orchestrator
@@ -285,7 +301,11 @@ async def main():
         loop.add_signal_handler(sig, lambda s=sig: signal_handler(s))
 
     try:
-        await orchestrator.run()
+        # Run both API server and data collector concurrently
+        await asyncio.gather(
+            run_api_server(),
+            orchestrator.run()
+        )
     except KeyboardInterrupt:
         logger.info("keyboard_interrupt_received")
     except Exception as e:
