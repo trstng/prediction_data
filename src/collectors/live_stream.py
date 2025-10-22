@@ -110,12 +110,13 @@ class LiveStreamCollector:
 
         try:
             # Use Kalshi's documented subscription format
+            # Note: market_ticker is singular, not plural
             subscribe_msg = {
                 "id": len(self.subscribed_markets) + 1,
                 "cmd": "subscribe",
                 "params": {
-                    "channels": ["ticker", "orderbook_delta", "trades"],
-                    "market_tickers": [ticker]
+                    "channels": ["orderbook_delta", "trades"],
+                    "market_ticker": ticker
                 }
             }
 
