@@ -28,8 +28,8 @@ class Settings(BaseSettings):
         # Just return as-is since python-dotenv preserves them
         return self.kalshi_api_secret
 
-    # PolyRouter API
-    polyrouter_api_key: str
+    # PolyRouter API (optional - only needed for historical backfill via explore_historical.py)
+    polyrouter_api_key: str = ""
     polyrouter_base_url: str = "https://api.polyrouter.io/functions/v1"
 
     # Supabase
@@ -39,7 +39,6 @@ class Settings(BaseSettings):
     # Data Collection
     target_sports: str = "NFL,NHL,NBA,CFB"
     collection_interval_seconds: int = 3
-    enable_historical_backfill: bool = True
     enable_live_streaming: bool = True
     enable_rest_polling: bool = True
 
