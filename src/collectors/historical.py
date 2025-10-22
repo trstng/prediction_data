@@ -275,31 +275,43 @@ class HistoricalDataCollector:
 
         return total_inserted
 
-    async def run_continuous_backfill(self, interval_hours: int = 24):
+    async def backfill_all_available_history(
+        self,
+        market_tickers: List[str],
+        batch_size: int = 5
+    ) -> int:
         """
-        Continuously backfill new markets as they're discovered.
+        One-time backfill of ALL available historical data from PolyRouter.
+        Fetches maximum available history (up to 365 days) for each market.
+        After this runs once, live streaming handles all future data.
 
         Args:
-            interval_hours: How often to check for new markets
+            market_tickers: List of market tickers to backfill
+            batch_size: Markets to process in parallel
+
+        Returns:
+            Total number of data points inserted
         """
-        logger.info("continuous_backfill_started", interval_hours=interval_hours)
+        logger.info(
+            "starting_full_historical_backfill",
+            total_markets=len(market_tickers),
+            max_days=365
+        )
 
-        while True:
-            try:
-                # Get all active markets from database
-                active_markets = await self.db.get_active_markets()
+        # Fetch maximum available history (365 days)
+        total_inserted = await self.backfill_markets(
+            market_tickers,
+            days_back=365,
+            batch_size=batch_size
+        )
 
-                if active_markets:
-                    tickers = [m["market_ticker"] for m in active_markets]
+        logger.info(
+            "full_historical_backfill_completed",
+            total_markets=len(market_tickers),
+            total_data_points=total_inserted
+        )
 
-                    # Backfill recent data (last 7 days)
-                    await self.backfill_markets(tickers, days_back=7)
-
-                await asyncio.sleep(interval_hours * 3600)
-
-            except Exception as e:
-                logger.error("continuous_backfill_error", error=str(e))
-                await asyncio.sleep(60)
+        return total_inserted
 
     async def close(self):
         """Close HTTP client."""

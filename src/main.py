@@ -97,12 +97,12 @@ class DataCollectorOrchestrator:
         return markets
 
     async def start_historical_backfill(self):
-        """Start historical data backfill."""
+        """Start one-time full historical data backfill."""
         if not self.historical_collector:
             logger.info("historical_backfill_disabled")
             return
 
-        logger.info("starting_historical_backfill")
+        logger.info("starting_one_time_full_historical_backfill")
 
         # Get active market tickers
         active_tickers = await self.market_finder.get_active_market_tickers()
@@ -111,14 +111,16 @@ class DataCollectorOrchestrator:
             logger.warning("no_active_markets_for_backfill")
             return
 
-        # Backfill recent data
+        # One-time backfill of ALL available historical data from PolyRouter
+        # This fetches maximum history (365 days) for each market
+        # After this, live streaming handles all future data
         await self.historical_collector.backfill_markets(
             active_tickers,
-            days_back=7,
+            days_back=365,  # Get all available history from PolyRouter
             batch_size=5
         )
 
-        logger.info("historical_backfill_completed")
+        logger.info("one_time_historical_backfill_completed")
 
     async def start_live_streaming(self):
         """Start live WebSocket streaming."""
