@@ -41,7 +41,14 @@ class KalshiAuth:
     def _load_private_key(self):
         """Load RSA private key from settings."""
         try:
-            key_bytes = self.api_secret.encode('utf-8')
+            # Handle both actual newlines and escaped \n sequences
+            # Railway may convert newlines to literal \n strings
+            key_string = self.api_secret
+            if '\\n' in key_string:
+                # Replace escaped newlines with actual newlines
+                key_string = key_string.replace('\\n', '\n')
+
+            key_bytes = key_string.encode('utf-8')
             self.private_key = serialization.load_pem_private_key(
                 key_bytes,
                 password=None,
@@ -49,7 +56,7 @@ class KalshiAuth:
             )
             logger.info("private_key_loaded_successfully")
         except Exception as e:
-            logger.error("private_key_load_failed", error=str(e))
+            logger.error("private_key_load_failed", error=str(e), key_preview=self.api_secret[:50] if self.api_secret else "None")
             self.private_key = None
 
     def _create_signature(self, timestamp: str, method: str, path: str, body: str = "") -> str:
@@ -123,7 +130,10 @@ class KalshiAuth:
             return True
 
         except Exception as e:
-            logger.error("kalshi_auth_failed", error=str(e))
+            logger.error("kalshi_auth_failed", error=str(e), error_type=type(e).__name__)
+            # Log more details for debugging
+            if hasattr(e, 'response'):
+                logger.error("kalshi_auth_response_details", status_code=e.response.status_code, response_text=e.response.text[:200])
             return False
 
     async def ensure_authenticated(self) -> bool:
