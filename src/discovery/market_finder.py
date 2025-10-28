@@ -83,7 +83,10 @@ class MarketFinder:
                 "NFL": "KXNFLGAME",      # Individual NFL game winners
                 "NHL": "KXNHLGAME",      # Individual NHL game winners
                 "NBA": "KXNBAGAME",      # Individual NBA game winners
-                "CFB": "KXNCAAFGAME"     # Individual CFB game winners
+                "NCAAF": "KXNCAAFGAME",  # Individual NCAAF game winners (changed from CFB)
+                "CFB": "KXNCAAFGAME",    # Alias for backwards compatibility
+                # Weather series - multiple series for different cities
+                "WEATHER": ["KXHIGHLAX", "KXHIGHNY", "KXHIGHAUS", "KXHIGHMIA", "KXHIGHCHI", "KXHIGHDEN"]
             }
 
             series_ticker = series_ticker_map.get(series)
@@ -91,50 +94,54 @@ class MarketFinder:
                 logger.warning("unknown_series", series=series)
                 return []
 
-            logger.info(f"Discovering markets for series_ticker={series_ticker}")
-
-            # Use the proper series_ticker parameter to get game winner markets
-            markets_data = await self.client.get_markets(
-                series_ticker=series_ticker,
-                status="open",
-                limit=1000
-            )
-
-            logger.info(f"Found {len(markets_data)} {series} markets from series {series_ticker}")
+            # Handle weather which has multiple series
+            series_tickers = series_ticker if isinstance(series_ticker, list) else [series_ticker]
 
             discovered = []
 
-            for market_data in markets_data:
-                ticker = market_data.get("ticker")
-                if not ticker:
-                    continue
+            for ticker_name in series_tickers:
+                logger.info(f"Discovering markets for series_ticker={ticker_name}")
 
-                # Create metadata
-                metadata = MarketMetadata(
-                    market_ticker=ticker,
-                    event_ticker=market_data.get("event_ticker", ""),
-                    series_ticker=series,
-                    title=market_data.get("title", ""),
-                    subtitle=market_data.get("subtitle"),
-                    market_type=market_data.get("market_type"),
-                    category=market_data.get("category"),
-                    open_time=self._parse_timestamp(market_data.get("open_time", "")),
-                    close_time=self._parse_timestamp(market_data.get("close_time", "")),
-                    expected_expiration_time=self._parse_timestamp(
-                        market_data.get("expected_expiration_time", "")
-                    ),
-                    status=market_data.get("status", "active"),
-                    volume_24h=market_data.get("volume_24h", 0),
-                    liquidity=market_data.get("liquidity"),
-                    can_close_early=market_data.get("can_close_early", False),
-                    expiration_value=market_data.get("expiration_value"),
-                    open_interest=market_data.get("open_interest", 0)
+                # Use the proper series_ticker parameter to get game winner markets
+                markets_data = await self.client.get_markets(
+                    series_ticker=ticker_name,
+                    status="open",
+                    limit=1000
                 )
 
-                discovered.append(metadata)
+                logger.info(f"Found {len(markets_data)} {series} markets from series {ticker_name}")
 
-                # Track as discovered
-                self.discovered_markets.add(ticker)
+                for market_data in markets_data:
+                    ticker = market_data.get("ticker")
+                    if not ticker:
+                        continue
+
+                    # Create metadata - use the high-level sport name (NFL, NBA, WEATHER) not the series_ticker
+                    metadata = MarketMetadata(
+                        market_ticker=ticker,
+                        event_ticker=market_data.get("event_ticker", ""),
+                        series_ticker=series,  # Use sport name (NFL, NBA, WEATHER) for consistency
+                        title=market_data.get("title", ""),
+                        subtitle=market_data.get("subtitle"),
+                        market_type=market_data.get("market_type"),
+                        category=market_data.get("category"),
+                        open_time=self._parse_timestamp(market_data.get("open_time", "")),
+                        close_time=self._parse_timestamp(market_data.get("close_time", "")),
+                        expected_expiration_time=self._parse_timestamp(
+                            market_data.get("expected_expiration_time", "")
+                        ),
+                        status=market_data.get("status", "active"),
+                        volume_24h=market_data.get("volume_24h", 0),
+                        liquidity=market_data.get("liquidity"),
+                        can_close_early=market_data.get("can_close_early", False),
+                        expiration_value=market_data.get("expiration_value"),
+                        open_interest=market_data.get("open_interest", 0)
+                    )
+
+                    discovered.append(metadata)
+
+                    # Track as discovered
+                    self.discovered_markets.add(ticker)
 
             logger.info(
                 "markets_discovered",
@@ -258,6 +265,29 @@ class MarketFinder:
         """
         active_markets = await self.db.get_active_markets()
         return [m["market_ticker"] for m in active_markets]
+
+    async def get_active_market_metadata(self) -> List[MarketMetadata]:
+        """
+        Get list of active market metadata objects.
+
+        Returns:
+            List of MarketMetadata objects
+        """
+        active_markets = await self.db.get_active_markets()
+        metadata_list = []
+
+        for market_dict in active_markets:
+            try:
+                metadata = MarketMetadata(**market_dict)
+                metadata_list.append(metadata)
+            except Exception as e:
+                logger.warning(
+                    "market_metadata_conversion_failed",
+                    ticker=market_dict.get("market_ticker"),
+                    error=str(e)
+                )
+
+        return metadata_list
 
     async def run_continuous_discovery(self):
         """Run continuous market discovery."""

@@ -1,8 +1,8 @@
 """
 Data models for Kalshi market data.
 """
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from typing import Optional, List, Dict, Any, Union
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
 
@@ -18,7 +18,7 @@ class MarketMetadata(BaseModel):
     open_time: Optional[int] = None
     close_time: Optional[int] = None
     expected_expiration_time: Optional[int] = None
-    settlement_value: Optional[str] = None
+    settlement_value: Optional[Union[str, int]] = None
     result: Optional[str] = None
     status: str = "active"
     volume_24h: int = 0
@@ -27,12 +27,23 @@ class MarketMetadata(BaseModel):
     expiration_value: Optional[str] = None
     open_interest: int = 0
 
+    @field_validator('settlement_value', mode='before')
+    @classmethod
+    def convert_settlement_value(cls, v):
+        """Convert settlement_value to string if it's an int."""
+        if v is None:
+            return None
+        return str(v)
+
 
 class MarketSnapshot(BaseModel):
     """Market snapshot model - comprehensive state at a point in time."""
     market_ticker: str
     timestamp: int  # Unix seconds
     timestamp_ms: int  # Unix milliseconds
+
+    # Sport/Category (denormalized for query performance)
+    sport: Optional[str] = None  # NFL, NBA, NHL, NCAAF, WEATHER
 
     # Price data
     yes_bid: Optional[int] = None
@@ -82,6 +93,9 @@ class Trade(BaseModel):
     size: int
     side: Optional[str] = None  # 'yes' or 'no'
     taker_side: Optional[str] = None  # 'buy' or 'sell'
+
+    # Sport/Category (denormalized for query performance)
+    sport: Optional[str] = None  # NFL, NBA, NHL, NCAAF, WEATHER
 
 
 class HistoricalPrice(BaseModel):

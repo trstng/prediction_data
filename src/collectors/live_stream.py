@@ -11,7 +11,7 @@ from websockets.client import WebSocketClientProtocol
 import structlog
 
 from config.settings import settings
-from src.database.models import MarketSnapshot, Trade, OrderbookDepth, OrderbookLevel
+from src.database.models import MarketSnapshot, Trade, OrderbookDepth, OrderbookLevel, MarketMetadata
 from src.database.writer import SupabaseWriter
 from src.collectors.kalshi_auth import KalshiAuth
 
@@ -40,6 +40,9 @@ class LiveStreamCollector:
         self.websocket: Optional[WebSocketClientProtocol] = None
         self.is_connected = False
         self.subscribed_markets: Set[str] = set()
+
+        # Sport lookup cache: ticker -> sport mapping
+        self.ticker_to_sport: Dict[str, str] = {}
 
         self.reconnect_delay = settings.ws_reconnect_delay_seconds
         self.max_reconnect_attempts = settings.ws_max_reconnect_attempts
@@ -155,14 +158,27 @@ class LiveStreamCollector:
         except Exception as e:
             logger.error("market_subscription_failed", ticker=ticker, error=str(e))
 
-    async def subscribe_markets(self, tickers: list[str]):
+    async def subscribe_markets(self, tickers: list[str], market_metadata: list[MarketMetadata] = None):
         """
         Subscribe to multiple markets.
         First subscribes to global ticker channel, then subscribes to each market individually.
 
         Args:
             tickers: List of market tickers
+            market_metadata: List of MarketMetadata to build sport lookup cache
         """
+        # Build sport lookup cache
+        if market_metadata:
+            for metadata in market_metadata:
+                if metadata.series_ticker:
+                    self.ticker_to_sport[metadata.market_ticker] = metadata.series_ticker
+
+            logger.info(
+                "sport_cache_built",
+                total_markets=len(self.ticker_to_sport),
+                sports=set(self.ticker_to_sport.values())
+            )
+
         # Subscribe to global ticker channel ONCE for all markets
         await self.subscribe_ticker_global()
         await asyncio.sleep(0.5)
@@ -212,6 +228,13 @@ class LiveStreamCollector:
             if not ticker:
                 return
 
+            # FILTER: Only process markets we subscribed to (prevents unwanted data)
+            if ticker not in self.subscribed_markets:
+                return
+
+            # Get sport from cache
+            sport = self.ticker_to_sport.get(ticker)
+
             now = datetime.utcnow()
             timestamp = int(now.timestamp())
             timestamp_ms = int(now.timestamp() * 1000)
@@ -233,6 +256,7 @@ class LiveStreamCollector:
                 market_ticker=ticker,
                 timestamp=timestamp,
                 timestamp_ms=timestamp_ms,
+                sport=sport,  # Add sport for query performance
                 yes_bid=yes_bid,
                 yes_ask=yes_ask,
                 no_bid=None,  # Not provided in ticker channel
@@ -255,6 +279,7 @@ class LiveStreamCollector:
             logger.debug(
                 "ticker_processed",
                 ticker=ticker,
+                sport=sport,
                 yes_bid=yes_bid,
                 yes_ask=yes_ask
             )
@@ -270,6 +295,13 @@ class LiveStreamCollector:
             ticker = msg.get("market_ticker")
             if not ticker:
                 return
+
+            # FILTER: Only process markets we subscribed to (prevents unwanted data)
+            if ticker not in self.subscribed_markets:
+                return
+
+            # Get sport from cache
+            sport = self.ticker_to_sport.get(ticker)
 
             now = datetime.utcnow()
             timestamp = int(now.timestamp())
@@ -293,7 +325,8 @@ class LiveStreamCollector:
                 price=price,
                 size=msg.get("count", msg.get("size", 1)),
                 side=msg.get("side"),
-                taker_side=taker_side
+                taker_side=taker_side,
+                sport=sport  # Add sport for query performance
             )
 
             # Insert trades immediately (they're less frequent than ticks)
@@ -302,6 +335,7 @@ class LiveStreamCollector:
             logger.debug(
                 "trade_processed",
                 ticker=ticker,
+                sport=sport,
                 price=trade.price,
                 size=trade.size
             )
@@ -354,12 +388,13 @@ class LiveStreamCollector:
             logger.error("websocket_listen_error", error=str(e))
             self.is_connected = False
 
-    async def run_with_reconnect(self, market_tickers: list[str]):
+    async def run_with_reconnect(self, market_tickers: list[str], market_metadata: list[MarketMetadata] = None):
         """
         Run WebSocket with automatic reconnection.
 
         Args:
             market_tickers: Markets to subscribe to
+            market_metadata: Market metadata for sport lookup cache
         """
         attempt = 0
 
@@ -374,8 +409,8 @@ class LiveStreamCollector:
                 # Reset attempt counter on successful connection
                 attempt = 0
 
-                # Subscribe to markets
-                await self.subscribe_markets(market_tickers)
+                # Subscribe to markets (pass metadata to build sport cache)
+                await self.subscribe_markets(market_tickers, market_metadata)
 
                 # Listen for messages
                 await self.listen()

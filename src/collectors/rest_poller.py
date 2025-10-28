@@ -3,12 +3,12 @@ REST API poller for supplementing WebSocket data.
 Polls Kalshi REST API at regular intervals as fallback/supplement.
 """
 import asyncio
-from typing import List, Set
+from typing import List, Set, Dict
 from datetime import datetime
 import structlog
 
 from config.settings import settings
-from src.database.models import MarketSnapshot, Trade, OrderbookDepth, OrderbookLevel
+from src.database.models import MarketSnapshot, Trade, OrderbookDepth, OrderbookLevel, MarketMetadata
 from src.database.writer import SupabaseWriter
 from src.collectors.kalshi_auth import KalshiRestClient, KalshiAuth
 from src.utils.rate_limiter import AdaptiveRateLimiter
@@ -39,6 +39,13 @@ class RestPoller:
         self.active_markets: Set[str] = set()
         self.is_running = False
 
+        # Sport lookup cache: ticker -> sport mapping
+        self.ticker_to_sport: Dict[str, str] = {}
+
+        # Track last processed trade timestamp per market to avoid duplicates
+        # Key: market_ticker, Value: latest timestamp
+        self.last_trade_timestamp: Dict[str, int] = {}
+
         logger.info(
             "rest_poller_initialized",
             poll_interval=self.poll_interval,
@@ -65,6 +72,9 @@ class RestPoller:
 
             await self.rate_limiter.report_success()
 
+            # Get sport from cache
+            sport = self.ticker_to_sport.get(ticker)
+
             # Create snapshot
             now = datetime.utcnow()
             timestamp = int(now.timestamp())
@@ -86,6 +96,7 @@ class RestPoller:
                 market_ticker=ticker,
                 timestamp=timestamp,
                 timestamp_ms=timestamp_ms,
+                sport=sport,  # Add sport for query performance
                 yes_bid=yes_bid,
                 yes_ask=yes_ask,
                 no_bid=no_bid,
@@ -104,7 +115,7 @@ class RestPoller:
 
             await self.db.queue_snapshot(snapshot)
 
-            logger.debug("market_polled", ticker=ticker)
+            logger.debug("market_polled", ticker=ticker, sport=sport)
 
             return True
 
@@ -182,6 +193,9 @@ class RestPoller:
         """
         Poll recent trades for a market.
 
+        Implements deduplication by tracking the last processed trade timestamp
+        per market to avoid inserting trades already captured via WebSocket.
+
         Args:
             ticker: Market ticker
 
@@ -198,7 +212,11 @@ class RestPoller:
 
             await self.rate_limiter.report_success()
 
-            trades = []
+            # Get the last processed timestamp for this market
+            last_timestamp = self.last_trade_timestamp.get(ticker, 0)
+            new_trades = []
+            latest_timestamp = last_timestamp
+
             for trade_data in trades_data:
                 # Parse timestamp if available
                 timestamp = int(datetime.utcnow().timestamp())
@@ -211,6 +229,12 @@ class RestPoller:
                     except:
                         pass
 
+                # Skip trades we've already processed
+                # Note: We still rely on the database unique constraint as the final safeguard
+                # This is just an optimization to reduce unnecessary database operations
+                if timestamp <= last_timestamp:
+                    continue
+
                 trade = Trade(
                     market_ticker=ticker,
                     trade_id=trade_data.get("trade_id"),
@@ -220,12 +244,30 @@ class RestPoller:
                     size=trade_data.get("count", trade_data.get("quantity", 1)),
                     taker_side=trade_data.get("taker_side")
                 )
-                trades.append(trade)
+                new_trades.append(trade)
 
-            if trades:
-                await self.db.insert_trades(trades)
+                # Track the latest timestamp
+                if timestamp > latest_timestamp:
+                    latest_timestamp = timestamp
 
-            logger.debug("trades_polled", ticker=ticker, count=len(trades))
+            # Insert only new trades
+            if new_trades:
+                await self.db.insert_trades(new_trades)
+                # Update the last processed timestamp
+                self.last_trade_timestamp[ticker] = latest_timestamp
+                logger.debug(
+                    "trades_polled",
+                    ticker=ticker,
+                    new_count=len(new_trades),
+                    total_fetched=len(trades_data),
+                    skipped=len(trades_data) - len(new_trades)
+                )
+            else:
+                logger.debug(
+                    "trades_polled_no_new",
+                    ticker=ticker,
+                    total_fetched=len(trades_data)
+                )
 
             return True
 
@@ -264,15 +306,29 @@ class RestPoller:
             successful=success_count
         )
 
-    async def update_active_markets(self, tickers: List[str]):
+    async def update_active_markets(self, tickers: List[str], market_metadata: List[MarketMetadata] = None):
         """
         Update the list of markets to poll.
 
         Args:
             tickers: List of market tickers
+            market_metadata: List of MarketMetadata to build sport lookup cache
         """
         self.active_markets = set(tickers)
-        logger.info("active_markets_updated", count=len(tickers))
+
+        # Build/update sport lookup cache
+        if market_metadata:
+            for metadata in market_metadata:
+                if metadata.series_ticker:
+                    self.ticker_to_sport[metadata.market_ticker] = metadata.series_ticker
+
+            logger.info(
+                "active_markets_updated",
+                count=len(tickers),
+                sports=set(self.ticker_to_sport.values())
+            )
+        else:
+            logger.info("active_markets_updated", count=len(tickers))
 
     async def run_continuous(self):
         """Run continuous polling loop."""

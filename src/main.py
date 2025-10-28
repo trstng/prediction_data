@@ -16,6 +16,7 @@ from src.collectors import (
     KalshiAuth,
     KalshiRestClient
 )
+from src.collectors.settlement_tracker import SettlementTracker
 from src.discovery import MarketFinder
 from src.monitoring import HealthMonitor
 
@@ -40,6 +41,9 @@ class DataCollectorOrchestrator:
 
         # Discovery
         self.market_finder = MarketFinder(self.db_writer, self.rest_client)
+
+        # Settlement tracking
+        self.settlement_tracker = SettlementTracker(self.db_writer, self.rest_client)
 
         # Monitoring
         self.health_monitor = HealthMonitor(self.db_writer)
@@ -99,11 +103,14 @@ class DataCollectorOrchestrator:
 
         logger.info("starting_live_streaming")
 
-        # Get active markets (use provided list or fetch from DB)
+        # Get active markets with metadata
         if market_tickers:
             active_tickers = market_tickers
+            # If tickers provided without metadata, fetch metadata
+            market_metadata = await self.market_finder.get_active_market_metadata()
         else:
-            active_tickers = await self.market_finder.get_active_market_tickers()
+            market_metadata = await self.market_finder.get_active_market_metadata()
+            active_tickers = [m.market_ticker for m in market_metadata]
 
         if not active_tickers:
             logger.warning("no_active_markets_for_streaming")
@@ -111,9 +118,9 @@ class DataCollectorOrchestrator:
 
         logger.info("websocket_markets_loaded", count=len(active_tickers))
 
-        # Start WebSocket streaming
+        # Start WebSocket streaming (pass metadata to build sport cache)
         task = asyncio.create_task(
-            self.live_streamer.run_with_reconnect(active_tickers)
+            self.live_streamer.run_with_reconnect(active_tickers, market_metadata)
         )
         self.tasks.append(task)
 
@@ -132,15 +139,16 @@ class DataCollectorOrchestrator:
 
         logger.info("starting_rest_polling")
 
-        # Get active markets
-        active_tickers = await self.market_finder.get_active_market_tickers()
+        # Get active markets with metadata
+        market_metadata = await self.market_finder.get_active_market_metadata()
+        active_tickers = [m.market_ticker for m in market_metadata]
 
         if not active_tickers:
             logger.warning("no_active_markets_for_polling")
             return
 
-        # Update poller with active markets
-        await self.rest_poller.update_active_markets(active_tickers)
+        # Update poller with active markets (pass metadata to build sport cache)
+        await self.rest_poller.update_active_markets(active_tickers, market_metadata)
 
         # Start polling
         task = asyncio.create_task(self.rest_poller.run_continuous())
@@ -160,6 +168,13 @@ class DataCollectorOrchestrator:
         task = asyncio.create_task(self.health_monitor.run_continuous_monitoring())
         self.tasks.append(task)
 
+    async def start_settlement_tracking(self):
+        """Start settlement tracking."""
+        logger.info("starting_settlement_tracking")
+
+        task = asyncio.create_task(self.settlement_tracker.run_continuous_tracking())
+        self.tasks.append(task)
+
     async def refresh_markets_periodically(self):
         """Periodically refresh active markets for collectors."""
         logger.info("starting_periodic_market_refresh")
@@ -168,17 +183,18 @@ class DataCollectorOrchestrator:
             try:
                 await asyncio.sleep(600)  # Every 10 minutes
 
-                # Get updated market list
-                active_tickers = await self.market_finder.get_active_market_tickers()
+                # Get updated market list with metadata
+                market_metadata = await self.market_finder.get_active_market_metadata()
+                active_tickers = [m.market_ticker for m in market_metadata]
 
                 logger.info(
                     "refreshing_active_markets",
                     count=len(active_tickers)
                 )
 
-                # Update REST poller
+                # Update REST poller (pass metadata to rebuild sport cache)
                 if self.rest_poller:
-                    await self.rest_poller.update_active_markets(active_tickers)
+                    await self.rest_poller.update_active_markets(active_tickers, market_metadata)
 
                 # Update live streamer (would need to implement resubscription)
                 # This is a simplified version - in production you'd handle adding/removing markets
@@ -216,6 +232,9 @@ class DataCollectorOrchestrator:
             # Start health monitoring
             await self.start_health_monitoring()
 
+            # Start settlement tracking
+            await self.start_settlement_tracking()
+
             # Start periodic market refresh
             refresh_task = asyncio.create_task(self.refresh_markets_periodically())
             self.tasks.append(refresh_task)
@@ -241,6 +260,9 @@ class DataCollectorOrchestrator:
         # Stop components
         if self.market_finder:
             await self.market_finder.stop()
+
+        if self.settlement_tracker:
+            await self.settlement_tracker.stop()
 
         if self.rest_poller:
             await self.rest_poller.stop()

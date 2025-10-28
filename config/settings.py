@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     supabase_key: str
 
     # Data Collection
-    target_sports: str = "NFL,NHL,NBA,CFB"
+    target_sports: str = "NFL,NHL,NBA,NCAAF,WEATHER"
     collection_interval_seconds: int = 3
     enable_live_streaming: bool = True
     enable_rest_polling: bool = True
